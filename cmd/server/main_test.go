@@ -57,8 +57,44 @@ func TestWebSocketConnection(t *testing.T) {
 	t.Log("WebSocket connection established successfully")
 }
 
+// sendJSONOperation is a test helper that serializes an Operation and sends it as JSON.
+func sendJSONOperation(t *testing.T, conn *websocket.Conn, op ws.Operation) {
+	t.Helper()
+
+	data, err := json.Marshal(op)
+	if err != nil {
+		t.Fatalf("failed to marshal operation: %v", err)
+	}
+
+	if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
+		t.Fatalf("failed to send operation: %v", err)
+	}
+}
+
+// readJSONResponse reads a single JSON message from the WebSocket connection
+// with a timeout and unmarshals it into a map.
+func readJSONResponse(t *testing.T, conn *websocket.Conn, timeout time.Duration) map[string]interface{} {
+	t.Helper()
+
+	conn.SetReadDeadline(time.Now().Add(timeout))
+	_, message, err := conn.ReadMessage()
+	if err != nil {
+		t.Fatalf("failed to read message: %v", err)
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(message, &resp); err != nil {
+		t.Fatalf("failed to parse response JSON: %v", err)
+	}
+	return resp
+}
+
+// TestWebSocketBroadcast verifies that operations are broadcast to all clients
+// in the same room, including the sender.
+//
+// Client A sends an insert operation → both A and B receive a document_update
+// Client B sends an insert operation → both A and B receive a document_update
 func TestWebSocketBroadcast(t *testing.T) {
-	// Use a fresh Hub for this test to isolate from other tests
 	hub := ws.NewHub()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws/documents/", func(w http.ResponseWriter, r *http.Request) {
@@ -84,52 +120,60 @@ func TestWebSocketBroadcast(t *testing.T) {
 	}
 	defer connB.Close()
 
-	// Client A sends a message, both Client A and Client B should receive it
-	msgA := "hello from A"
-	if err := connA.WriteMessage(websocket.TextMessage, []byte(msgA)); err != nil {
-		t.Fatalf("Client A send failed: %v", err)
+	// Client A sends an insert operation
+	opA := ws.Operation{
+		Type:     ws.InsertOperation,
+		Position: 0,
+		Text:     "hello from A",
+	}
+	sendJSONOperation(t, connA, opA)
+
+	// Client A should receive a document_update (self-broadcast)
+	respA1 := readJSONResponse(t, connA, 2*time.Second)
+	if respA1["type"] != "document_update" {
+		t.Errorf("Client A expected 'document_update', got '%v'", respA1["type"])
+	}
+	contentA, _ := respA1["content"].(string)
+	if contentA != "hello from A" {
+		t.Errorf("Client A expected content 'hello from A', got '%s'", contentA)
 	}
 
-	// Client A should receive its own message (broadcast to all, including sender)
-	_, respA1, err := connA.ReadMessage()
-	if err != nil {
-		t.Fatalf("Client A first read failed: %v", err)
+	// Client B should receive the document_update
+	respB := readJSONResponse(t, connB, 2*time.Second)
+	if respB["type"] != "document_update" {
+		t.Errorf("Client B expected 'document_update', got '%v'", respB["type"])
 	}
-	if string(respA1) != msgA {
-		t.Errorf("Client A expected '%s' (self-broadcast), got '%s'", msgA, string(respA1))
-	}
-
-	// Client B should receive the message from A
-	_, respB, err := connB.ReadMessage()
-	if err != nil {
-		t.Fatalf("Client B read failed: %v", err)
-	}
-	if string(respB) != msgA {
-		t.Errorf("Client B expected '%s', got '%s'", msgA, string(respB))
+	contentB, _ := respB["content"].(string)
+	if contentB != "hello from A" {
+		t.Errorf("Client B expected content 'hello from A', got '%s'", contentB)
 	}
 
-	// Client B sends a message, both Client A and Client B should receive it
-	msgB := "hello from B"
-	if err := connB.WriteMessage(websocket.TextMessage, []byte(msgB)); err != nil {
-		t.Fatalf("Client B send failed: %v", err)
+	// Client B sends an insert operation
+	opB := ws.Operation{
+		Type:     ws.InsertOperation,
+		Position: 0,
+		Text:     "hello from B",
+	}
+	sendJSONOperation(t, connB, opB)
+
+	// Client B should receive a document_update (self-broadcast)
+	respB2 := readJSONResponse(t, connB, 2*time.Second)
+	if respB2["type"] != "document_update" {
+		t.Errorf("Client B expected 'document_update', got '%v'", respB2["type"])
+	}
+	contentB2, _ := respB2["content"].(string)
+	if contentB2 != "hello from Bhello from A" {
+		t.Errorf("Client B expected content 'hello from Bhello from A', got '%s'", contentB2)
 	}
 
-	// Client B should receive its own message (self-broadcast)
-	_, respB2, err := connB.ReadMessage()
-	if err != nil {
-		t.Fatalf("Client B second read failed: %v", err)
+	// Client A should receive the document_update
+	respA2 := readJSONResponse(t, connA, 2*time.Second)
+	if respA2["type"] != "document_update" {
+		t.Errorf("Client A expected 'document_update', got '%v'", respA2["type"])
 	}
-	if string(respB2) != msgB {
-		t.Errorf("Client B expected '%s' (self-broadcast), got '%s'", msgB, string(respB2))
-	}
-
-	// Client A should receive the message from B
-	_, respA2, err := connA.ReadMessage()
-	if err != nil {
-		t.Fatalf("Client A second read failed: %v", err)
-	}
-	if string(respA2) != msgB {
-		t.Errorf("Client A expected '%s', got '%s'", msgB, string(respA2))
+	contentA2, _ := respA2["content"].(string)
+	if contentA2 != "hello from Bhello from A" {
+		t.Errorf("Client A expected content 'hello from Bhello from A', got '%s'", contentA2)
 	}
 }
 
@@ -166,28 +210,32 @@ func TestMultipleWebSocketConnections(t *testing.T) {
 	}
 	defer connC.Close()
 
-	// A sends a message, B and C should both receive it
-	msgA := "from A"
-	if err := connA.WriteMessage(websocket.TextMessage, []byte(msgA)); err != nil {
-		t.Fatalf("Client A send failed: %v", err)
+	// A sends an insert operation
+	opA := ws.Operation{
+		Type:     ws.InsertOperation,
+		Position: 0,
+		Text:     "from A",
+	}
+	sendJSONOperation(t, connA, opA)
+
+	// B receives the document_update
+	respB := readJSONResponse(t, connB, 2*time.Second)
+	if respB["type"] != "document_update" {
+		t.Errorf("Client B expected 'document_update', got '%v'", respB["type"])
+	}
+	contentB, _ := respB["content"].(string)
+	if contentB != "from A" {
+		t.Errorf("Client B expected content 'from A', got '%s'", contentB)
 	}
 
-	// B receives
-	_, respB, err := connB.ReadMessage()
-	if err != nil {
-		t.Fatalf("Client B read failed: %v", err)
+	// C receives the document_update
+	respC := readJSONResponse(t, connC, 2*time.Second)
+	if respC["type"] != "document_update" {
+		t.Errorf("Client C expected 'document_update', got '%v'", respC["type"])
 	}
-	if string(respB) != msgA {
-		t.Errorf("Client B expected '%s', got '%s'", msgA, string(respB))
-	}
-
-	// C receives
-	_, respC, err := connC.ReadMessage()
-	if err != nil {
-		t.Fatalf("Client C read failed: %v", err)
-	}
-	if string(respC) != msgA {
-		t.Errorf("Client C expected '%s', got '%s'", msgA, string(respC))
+	contentC, _ := respC["content"].(string)
+	if contentC != "from A" {
+		t.Errorf("Client C expected content 'from A', got '%s'", contentC)
 	}
 }
 
@@ -253,10 +301,18 @@ func TestRoomIsolation(t *testing.T) {
 	}
 	defer connB.Close()
 
-	// A sends a message in document-123
-	msgA := "secret for room 123"
-	if err := connA.WriteMessage(websocket.TextMessage, []byte(msgA)); err != nil {
-		t.Fatalf("Client A send failed: %v", err)
+	// A sends an insert operation in document-123
+	opA := ws.Operation{
+		Type:     ws.InsertOperation,
+		Position: 0,
+		Text:     "secret for room 123",
+	}
+	sendJSONOperation(t, connA, opA)
+
+	// A should receive a document_update (self-broadcast)
+	respA := readJSONResponse(t, connA, 2*time.Second)
+	if respA["type"] != "document_update" {
+		t.Errorf("Client A expected 'document_update', got '%v'", respA["type"])
 	}
 
 	// B should NOT receive the message (different room)
@@ -303,19 +359,21 @@ func TestSlowClientDisconnection(t *testing.T) {
 	// 1MB messages ensure that WriteMessage blocks on B's connection
 	// (since the TCP send buffer is typically ~200KB), which causes
 	// B's writePump to block, which fills B's Send channel.
-	payload := make([]byte, 1024*1024)
-	for i := range payload {
-		payload[i] = 'x'
-	}
+	largeText := strings.Repeat("x", 1024*1024)
 
 	msgCount := 0
 	for {
-		if err := connA.WriteMessage(websocket.TextMessage, payload); err != nil {
+		op := ws.Operation{
+			Type:     ws.InsertOperation,
+			Position: 0,
+			Text:     largeText,
+		}
+		if err := connA.WriteMessage(websocket.TextMessage, mustMarshalJSON(op)); err != nil {
 			t.Fatalf("Client A send failed after %d messages: %v", msgCount, err)
 		}
 
 		// Read A's own broadcast to keep A's send buffer from filling
-		connA.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
+		connA.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
 		_, _, err := connA.ReadMessage()
 		if err != nil {
 			t.Fatalf("Client A read failed after %d messages: %v", msgCount, err)
@@ -376,26 +434,28 @@ func TestFastClientNotAffectedBySlowClientDisconnection(t *testing.T) {
 
 	// Use a large message payload to fill the TCP send buffer faster.
 	// 1MB messages ensure that WriteMessage blocks on B's connection.
-	payload := make([]byte, 1024*1024)
-	for i := range payload {
-		payload[i] = 'x'
-	}
+	largeText := strings.Repeat("x", 1024*1024)
 
 	// Send messages from A until B gets disconnected
 	msgCount := 0
 	for {
-		if err := connA.WriteMessage(websocket.TextMessage, payload); err != nil {
+		op := ws.Operation{
+			Type:     ws.InsertOperation,
+			Position: 0,
+			Text:     largeText,
+		}
+		if err := connA.WriteMessage(websocket.TextMessage, mustMarshalJSON(op)); err != nil {
 			t.Fatalf("Client A send failed: %v", err)
 		}
 
 		// Read A's own broadcast
-		connA.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
+		connA.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
 		if _, _, err := connA.ReadMessage(); err != nil {
 			t.Fatalf("Client A read failed: %v", err)
 		}
 
 		// Read C's broadcast too so C's send buffer doesn't fill up
-		connC.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
+		connC.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
 		if _, _, err := connC.ReadMessage(); err != nil {
 			t.Fatalf("Client C read failed: %v", err)
 		}
@@ -417,29 +477,35 @@ func TestFastClientNotAffectedBySlowClientDisconnection(t *testing.T) {
 
 	// Now verify that fast clients (A and C) can still communicate
 	msg := "hello after slow client was removed"
-	if err := connA.WriteMessage(websocket.TextMessage, []byte(msg)); err != nil {
-		t.Fatalf("Client A send after slow client disconnect failed: %v", err)
+	op := ws.Operation{
+		Type:     ws.InsertOperation,
+		Position: 0,
+		Text:     msg,
 	}
+	sendJSONOperation(t, connA, op)
 
 	// A should receive its own broadcast
-	_, respA, err := connA.ReadMessage()
-	if err != nil {
-		t.Fatalf("Client A read after slow client disconnect failed: %v", err)
-	}
-	if string(respA) != msg {
-		t.Errorf("Client A expected '%s', got '%s'", msg, string(respA))
+	respA := readJSONResponse(t, connA, 2*time.Second)
+	if respA["type"] != "document_update" {
+		t.Errorf("Client A expected 'document_update', got '%v'", respA["type"])
 	}
 
-	// C should receive the message too
-	_, respC, err := connC.ReadMessage()
-	if err != nil {
-		t.Fatalf("Client C read after slow client disconnect failed: %v", err)
-	}
-	if string(respC) != msg {
-		t.Errorf("Client C expected '%s', got '%s'", msg, string(respC))
+	// C should receive the document_update too
+	respC := readJSONResponse(t, connC, 2*time.Second)
+	if respC["type"] != "document_update" {
+		t.Errorf("Client C expected 'document_update', got '%v'", respC["type"])
 	}
 
 	t.Logf("Fast clients continue to work after slow client was disconnected")
+}
+
+// mustMarshalJSON serializes a value to JSON, failing the test on error.
+func mustMarshalJSON(v interface{}) []byte {
+	data, err := json.Marshal(v)
+	if err != nil {
+		panic(err)
+	}
+	return data
 }
 
 // handleWebSocketForTest is a test wrapper that uses the Hub's HandleWebSocket

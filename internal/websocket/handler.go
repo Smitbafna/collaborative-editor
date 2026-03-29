@@ -1,6 +1,7 @@
 package websocket
 
 import (
+	"encoding/json"
 	"log"
 	"net/http"
 	"strings"
@@ -17,12 +18,16 @@ var upgrader = websocket.Upgrader{
 // Hub manages WebSocket connections grouped by document (room).
 type Hub struct {
 	RoomManager *RoomManager
+	Processor   *OperationProcessor
 }
 
-// NewHub creates and returns a new Hub with an initialized RoomManager.
+// NewHub creates and returns a new Hub with an initialized RoomManager
+// and OperationProcessor.
 func NewHub() *Hub {
+	rm := NewRoomManager()
 	return &Hub{
-		RoomManager: NewRoomManager(),
+		RoomManager: rm,
+		Processor:   NewOperationProcessor(rm),
 	}
 }
 
@@ -58,7 +63,21 @@ func (h *Hub) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	go h.handleClient(client, documentID)
 }
 
-// handleClient reads messages from a client and broadcasts them to the room.
+// handleClient reads messages from a client, processes them through the
+// OperationProcessor, and broadcasts the results to the room.
+//
+// The flow is:
+//
+//	Read message → Parse JSON → Process via OperationProcessor
+//	                                     │
+//	                        ┌────────────┤
+//	                        ▼            ▼
+//	                   Send error    Apply operation
+//	                   to client     Broadcast to room
+//
+// The OperationProcessor handles validation and mutation under the room's
+// write lock. Broadcasting happens after the lock is released to avoid
+// holding the lock during network writes.
 func (h *Hub) handleClient(client *Client, documentID string) {
 	defer func() {
 		room, _ := h.RoomManager.GetRoom(documentID)
@@ -73,15 +92,55 @@ func (h *Hub) handleClient(client *Client, documentID string) {
 	}()
 
 	for {
-		messageType, message, err := client.Conn.ReadMessage()
+		_, message, err := client.Conn.ReadMessage()
 		if err != nil {
 			log.Printf("client %s disconnected: %v", client.ID, err)
 			return
 		}
 		log.Printf("received message from client %s in document %s: %s", client.ID, documentID, message)
 
-		// Broadcast the message to all other clients in the same room
-		h.broadcastToRoom(documentID, client.ID, messageType, message)
+		// Parse the incoming message as an Operation
+		var op Operation
+		if err := json.Unmarshal(message, &op); err != nil {
+			log.Printf("client %s: failed to parse operation: %v", client.ID, err)
+			continue
+		}
+
+		// Delegate to the OperationProcessor for validation and application
+		result := h.Processor.Process(documentID, op)
+
+		if result.Err != nil {
+			log.Printf("client %s: operation rejected: %v", client.ID, result.Err)
+			errorResponse, marshalErr := json.Marshal(map[string]interface{}{
+				"type":      "error",
+				"error":     result.Err.Error(),
+				"operation": result.Operation,
+			})
+			if marshalErr != nil {
+				log.Printf("failed to marshal error response: %v", marshalErr)
+				continue
+			}
+			select {
+			case client.Send <- errorResponse:
+			default:
+				log.Printf("client %s: send buffer full, dropping error response", client.ID)
+			}
+			continue
+		}
+
+		// Broadcast the operation to all other clients in the room.
+		// This happens outside the room's lock so that slow network writes
+		// do not block other operations.
+		//
+		// The operation is broadcast as-is — receiving clients will apply it
+		// locally to stay in sync with the server's document state.
+		response, err := json.Marshal(result.Operation)
+		if err != nil {
+			log.Printf("failed to marshal operation for broadcast: %v", err)
+			continue
+		}
+
+		h.broadcastToRoom(documentID, client.ID, websocket.TextMessage, response)
 	}
 }
 
@@ -100,14 +159,17 @@ func (h *Hub) broadcastToRoom(documentID string, senderID string, messageType in
 
 	log.Printf("broadcast message\nroom=%s\nclients=%d", documentID, len(clients))
 
-	for _, client := range clients {
+	for _, c := range clients {
+		if c.ID == senderID {
+			continue
+		}
 		select {
-		case client.Send <- message:
+		case c.Send <- message:
 		default:
 			// Client's send buffer is full — this client is too slow to keep up.
 			// Disconnect the slow client to prevent it from blocking the room.
-			log.Printf("client %s is too slow, disconnecting", client.ID)
-			go h.disconnectSlowClient(documentID, client)
+			log.Printf("client %s is too slow, disconnecting", c.ID)
+			go h.disconnectSlowClient(documentID, c)
 		}
 	}
 }

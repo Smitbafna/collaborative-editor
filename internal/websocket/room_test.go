@@ -1,6 +1,7 @@
 package websocket
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -403,6 +404,357 @@ func TestRoomContentOverwrite(t *testing.T) {
 	}
 }
 
+// TestRoomApplyOperationInsert verifies that an insert operation correctly
+// modifies the document content.
+//
+// Initial content: "Hello World"
+// Insert "Beautiful " at position 6
+// Expected: "Hello Beautiful World"
+func TestRoomApplyOperationInsert(t *testing.T) {
+	room := NewRoom("test-room")
+	room.SetContent("Hello World")
+
+	op := Operation{
+		Type:     InsertOperation,
+		Position: 6,
+		Text:     "Beautiful ",
+	}
+
+	updated := room.ApplyOperation(op)
+
+	expected := "Hello Beautiful World"
+	if updated != expected {
+		t.Errorf("expected '%s', got '%s'", expected, updated)
+	}
+
+	// Verify the room content was actually updated
+	if got := room.GetContent(); got != expected {
+		t.Errorf("room content expected '%s', got '%s'", expected, got)
+	}
+}
+
+// TestRoomApplyOperationInsertAtBeginning verifies inserting at position 0.
+//
+// Initial content: "World"
+// Insert "Hello " at position 0
+// Expected: "Hello World"
+func TestRoomApplyOperationInsertAtBeginning(t *testing.T) {
+	room := NewRoom("test-room")
+	room.SetContent("World")
+
+	op := Operation{
+		Type:     InsertOperation,
+		Position: 0,
+		Text:     "Hello ",
+	}
+
+	updated := room.ApplyOperation(op)
+
+	expected := "Hello World"
+	if updated != expected {
+		t.Errorf("expected '%s', got '%s'", expected, updated)
+	}
+}
+
+// TestRoomApplyOperationInsertAtEnd verifies inserting at the end of the content.
+//
+// Initial content: "Hello"
+// Insert " World" at position 5
+// Expected: "Hello World"
+func TestRoomApplyOperationInsertAtEnd(t *testing.T) {
+	room := NewRoom("test-room")
+	room.SetContent("Hello")
+
+	op := Operation{
+		Type:     InsertOperation,
+		Position: 5,
+		Text:     " World",
+	}
+
+	updated := room.ApplyOperation(op)
+
+	expected := "Hello World"
+	if updated != expected {
+		t.Errorf("expected '%s', got '%s'", expected, updated)
+	}
+}
+
+// TestRoomApplyOperationInsertInvalidPosition verifies that an insert with
+// an invalid position (beyond content length) does not modify the content.
+//
+// Initial content: "Hello"
+// Insert "X" at position 10 (invalid)
+// Expected: "Hello" (unchanged)
+func TestRoomApplyOperationInsertInvalidPosition(t *testing.T) {
+	room := NewRoom("test-room")
+	room.SetContent("Hello")
+
+	op := Operation{
+		Type:     InsertOperation,
+		Position: 10,
+		Text:     "X",
+	}
+
+	updated := room.ApplyOperation(op)
+
+	expected := "Hello"
+	if updated != expected {
+		t.Errorf("expected '%s' (unchanged), got '%s'", expected, updated)
+	}
+}
+
+// TestRoomApplyOperationInsertNegativePosition verifies that an insert with
+// a negative position does not modify the content.
+//
+// Initial content: "Hello"
+// Insert "X" at position -1 (invalid)
+// Expected: "Hello" (unchanged)
+func TestRoomApplyOperationInsertNegativePosition(t *testing.T) {
+	room := NewRoom("test-room")
+	room.SetContent("Hello")
+
+	op := Operation{
+		Type:     InsertOperation,
+		Position: -1,
+		Text:     "X",
+	}
+
+	updated := room.ApplyOperation(op)
+
+	expected := "Hello"
+	if updated != expected {
+		t.Errorf("expected '%s' (unchanged), got '%s'", expected, updated)
+	}
+}
+
+// TestRoomApplyOperationDelete verifies that a delete operation correctly
+// removes characters from the document content.
+//
+// Initial content: "Hello World"
+// Delete 5 characters at position 6 (deletes "World")
+// Expected: "Hello "
+func TestRoomApplyOperationDelete(t *testing.T) {
+	room := NewRoom("test-room")
+	room.SetContent("Hello World")
+
+	op := Operation{
+		Type:     DeleteOperation,
+		Position: 6,
+		Length:   5,
+	}
+
+	updated := room.ApplyOperation(op)
+
+	expected := "Hello "
+	if updated != expected {
+		t.Errorf("expected '%s', got '%s'", expected, updated)
+	}
+}
+
+// TestRoomApplyOperationDeleteFromBeginning verifies deleting from position 0.
+//
+// Initial content: "Hello World"
+// Delete 6 characters at position 0
+// Expected: "World"
+func TestRoomApplyOperationDeleteFromBeginning(t *testing.T) {
+	room := NewRoom("test-room")
+	room.SetContent("Hello World")
+
+	op := Operation{
+		Type:     DeleteOperation,
+		Position: 0,
+		Length:   6,
+	}
+
+	updated := room.ApplyOperation(op)
+
+	expected := "World"
+	if updated != expected {
+		t.Errorf("expected '%s', got '%s'", expected, updated)
+	}
+}
+
+// TestRoomApplyOperationDeleteInvalidPosition verifies that a delete with
+// an invalid position (beyond content length) does not modify the content.
+//
+// Initial content: "Hello"
+// Delete 1 character at position 10 (invalid)
+// Expected: "Hello" (unchanged)
+func TestRoomApplyOperationDeleteInvalidPosition(t *testing.T) {
+	room := NewRoom("test-room")
+	room.SetContent("Hello")
+
+	op := Operation{
+		Type:     DeleteOperation,
+		Position: 10,
+		Length:   1,
+	}
+
+	updated := room.ApplyOperation(op)
+
+	expected := "Hello"
+	if updated != expected {
+		t.Errorf("expected '%s' (unchanged), got '%s'", expected, updated)
+	}
+}
+
+// TestRoomApplyOperationDeleteNegativePosition verifies that a delete with
+// a negative position does not modify the content.
+//
+// Initial content: "Hello"
+// Delete 1 character at position -1 (invalid)
+// Expected: "Hello" (unchanged)
+func TestRoomApplyOperationDeleteNegativePosition(t *testing.T) {
+	room := NewRoom("test-room")
+	room.SetContent("Hello")
+
+	op := Operation{
+		Type:     DeleteOperation,
+		Position: -1,
+		Length:   1,
+	}
+
+	updated := room.ApplyOperation(op)
+
+	expected := "Hello"
+	if updated != expected {
+		t.Errorf("expected '%s' (unchanged), got '%s'", expected, updated)
+	}
+}
+
+// TestRoomApplyOperationDeletePastEnd verifies that a delete with length
+// extending past the end of the content only deletes up to the end.
+//
+// Initial content: "Hello"
+// Delete 100 characters at position 3 (only 2 characters remain)
+// Expected: "Hel"
+func TestRoomApplyOperationDeletePastEnd(t *testing.T) {
+	room := NewRoom("test-room")
+	room.SetContent("Hello")
+
+	op := Operation{
+		Type:     DeleteOperation,
+		Position: 3,
+		Length:   100,
+	}
+
+	updated := room.ApplyOperation(op)
+
+	expected := "Hel"
+	if updated != expected {
+		t.Errorf("expected '%s', got '%s'", expected, updated)
+	}
+}
+
+// TestRoomApplyOperationInsertOnEmptyContent verifies inserting into empty content.
+//
+// Initial content: ""
+// Insert "Hello" at position 0
+// Expected: "Hello"
+func TestRoomApplyOperationInsertOnEmptyContent(t *testing.T) {
+	room := NewRoom("test-room")
+
+	op := Operation{
+		Type:     InsertOperation,
+		Position: 0,
+		Text:     "Hello",
+	}
+
+	updated := room.ApplyOperation(op)
+
+	expected := "Hello"
+	if updated != expected {
+		t.Errorf("expected '%s', got '%s'", expected, updated)
+	}
+}
+
+// TestRoomApplyOperationDeleteOnEmptyContent verifies deleting from empty content.
+//
+// Initial content: ""
+// Delete 1 character at position 0 (invalid — empty content)
+// Expected: "" (unchanged)
+func TestRoomApplyOperationDeleteOnEmptyContent(t *testing.T) {
+	room := NewRoom("test-room")
+
+	op := Operation{
+		Type:     DeleteOperation,
+		Position: 0,
+		Length:   1,
+	}
+
+	updated := room.ApplyOperation(op)
+
+	expected := ""
+	if updated != expected {
+		t.Errorf("expected '%s' (unchanged), got '%s'", expected, updated)
+	}
+}
+
+// TestRoomApplyOperationMultiple verifies that multiple operations can be
+// applied sequentially to build up content.
+//
+// Insert "Hello" at 0 → "Hello"
+// Insert " World" at 5 → "Hello World"
+// Delete 6 at 0 → "World"
+// Insert "Goodbye " at 0 → "Goodbye World"
+func TestRoomApplyOperationMultiple(t *testing.T) {
+	room := NewRoom("test-room")
+
+	op1 := Operation{Type: InsertOperation, Position: 0, Text: "Hello"}
+	room.ApplyOperation(op1)
+
+	op2 := Operation{Type: InsertOperation, Position: 5, Text: " World"}
+	room.ApplyOperation(op2)
+
+	op3 := Operation{Type: DeleteOperation, Position: 0, Length: 6}
+	room.ApplyOperation(op3)
+
+	op4 := Operation{Type: InsertOperation, Position: 0, Text: "Goodbye "}
+	room.ApplyOperation(op4)
+
+	expected := "Goodbye World"
+	if got := room.GetContent(); got != expected {
+		t.Errorf("expected '%s', got '%s'", expected, got)
+	}
+}
+
+// TestRoomApplyOperationConcurrent verifies that ApplyOperation can be called
+// concurrently from multiple goroutines without data races.
+func TestRoomApplyOperationConcurrent(t *testing.T) {
+	room := NewRoom("test-room")
+	room.SetContent("")
+
+	const goroutines = 10
+	const operationsPerGoroutine = 50
+
+	done := make(chan bool)
+
+	for range goroutines {
+		go func() {
+			for range operationsPerGoroutine {
+				op := Operation{
+					Type:     InsertOperation,
+					Position: 0,
+					Text:     "a",
+				}
+				room.ApplyOperation(op)
+			}
+			done <- true
+		}()
+	}
+
+	// Wait for all goroutines to finish
+	for range goroutines {
+		<-done
+	}
+
+	// Content should have all the inserted characters
+	expectedLen := goroutines * operationsPerGoroutine
+	if got := len(room.GetContent()); got != expectedLen {
+		t.Errorf("expected content length %d, got %d", expectedLen, got)
+	}
+}
+
 // TestRoomContentConcurrentAccess verifies that content can be safely
 // read and written concurrently without data races.
 func TestRoomContentConcurrentAccess(t *testing.T) {
@@ -494,16 +846,30 @@ func expectNoMessage(t *testing.T, conn *websocket.Conn, label string, wait time
 	}
 }
 
+// sendOperation is a test helper that serializes an Operation and sends it as JSON.
+func sendOperation(t *testing.T, conn *websocket.Conn, op Operation) {
+	t.Helper()
+
+	data, err := json.Marshal(op)
+	if err != nil {
+		t.Fatalf("failed to marshal operation: %v", err)
+	}
+
+	if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
+		t.Fatalf("failed to send operation: %v", err)
+	}
+}
+
 // TestIntegrationWebSocketBroadcastSameRoom verifies the full WebSocket pipeline:
 //
 //  1. Start a test HTTP server with the WebSocket handler
 //  2. Connect Client A to document-123
 //  3. Connect Client B to document-123
-//  4. Client A sends "hello"
-//  5. Client B receives "hello"
+//  4. Client A sends an insert operation
+//  5. Client B receives the operation broadcast as-is and applies it locally
 //
 // This validates:
-//   WebSocket → Connection → Room Manager → Room → Broadcast → Other WebSocket
+//   WebSocket → Connection → Room Manager → Room → ApplyOperation → Broadcast → Other WebSocket
 func TestIntegrationWebSocketBroadcastSameRoom(t *testing.T) {
 	// Start a test HTTP server
 	hub := NewHub()
@@ -520,16 +886,30 @@ func TestIntegrationWebSocketBroadcastSameRoom(t *testing.T) {
 	connB := connectClient(t, server.URL, "document-123")
 	defer connB.Close()
 
-	// Client A sends "hello"
-	message := []byte("hello")
-	if err := connA.WriteMessage(websocket.TextMessage, message); err != nil {
-		t.Fatalf("client A failed to send message: %v", err)
+	// Client A sends an insert operation
+	op := Operation{
+		Type:     InsertOperation,
+		Position: 0,
+		Text:     "Hello World",
+	}
+	sendOperation(t, connA, op)
+
+	// Client B should receive the raw operation broadcast
+	got := readMessage(t, connB, time.Second)
+
+	var receivedOp Operation
+	if err := json.Unmarshal(got, &receivedOp); err != nil {
+		t.Fatalf("failed to parse broadcast operation JSON: %v", err)
 	}
 
-	// Client B should receive "hello"
-	got := readMessage(t, connB, time.Second)
-	if string(got) != "hello" {
-		t.Errorf("client B expected 'hello', got '%s'", string(got))
+	if receivedOp.Type != InsertOperation {
+		t.Errorf("expected operation type 'insert', got '%v'", receivedOp.Type)
+	}
+	if receivedOp.Position != 0 {
+		t.Errorf("expected position 0, got %d", receivedOp.Position)
+	}
+	if receivedOp.Text != "Hello World" {
+		t.Errorf("expected text 'Hello World', got '%s'", receivedOp.Text)
 	}
 }
 
@@ -612,13 +992,15 @@ func TestIntegrationConcurrentConnections(t *testing.T) {
 	}
 
 	// Test that broadcasting works with all clients connected
-	// Send a message from client 0, all others should receive it
-	message := []byte("concurrent-test")
-	if err := connections[0].WriteMessage(websocket.TextMessage, message); err != nil {
-		t.Fatalf("client 0 failed to send message: %v", err)
+	// Send an operation from client 0, all others should receive the raw operation
+	op := Operation{
+		Type:     InsertOperation,
+		Position: 0,
+		Text:     "concurrent-test",
 	}
+	sendOperation(t, connections[0], op)
 
-	// All other clients should receive the message
+	// All other clients should receive the raw operation broadcast
 	for i := 1; i < len(connections); i++ {
 		connections[i].SetReadDeadline(time.Now().Add(5 * time.Second))
 		_, msg, err := connections[i].ReadMessage()
@@ -626,8 +1008,21 @@ func TestIntegrationConcurrentConnections(t *testing.T) {
 			t.Errorf("client %d failed to receive message: %v", i, err)
 			continue
 		}
-		if string(msg) != "concurrent-test" {
-			t.Errorf("client %d expected 'concurrent-test', got '%s'", i, string(msg))
+
+		var receivedOp Operation
+		if err := json.Unmarshal(msg, &receivedOp); err != nil {
+			t.Errorf("client %d: failed to parse operation JSON: %v", i, err)
+			continue
+		}
+
+		if receivedOp.Type != InsertOperation {
+			t.Errorf("client %d: expected operation type 'insert', got '%v'", i, receivedOp.Type)
+		}
+		if receivedOp.Position != 0 {
+			t.Errorf("client %d: expected position 0, got %d", i, receivedOp.Position)
+		}
+		if receivedOp.Text != "concurrent-test" {
+			t.Errorf("client %d: expected text 'concurrent-test', got '%s'", i, receivedOp.Text)
 		}
 	}
 
@@ -669,18 +1064,458 @@ func TestIntegrationWebSocketRoomIsolation(t *testing.T) {
 	connC := connectClient(t, server.URL, "document-456")
 	defer connC.Close()
 
-	// Client A sends "world"
-	message := []byte("world")
-	if err := connA.WriteMessage(websocket.TextMessage, message); err != nil {
-		t.Fatalf("client A failed to send message: %v", err)
+	// Client A sends an insert operation
+	op := Operation{
+		Type:     InsertOperation,
+		Position: 0,
+		Text:     "world",
+	}
+	sendOperation(t, connA, op)
+
+	// Client B (same room) should receive the raw operation broadcast
+	got := readMessage(t, connB, time.Second)
+
+	var receivedOp Operation
+	if err := json.Unmarshal(got, &receivedOp); err != nil {
+		t.Fatalf("failed to parse broadcast operation JSON: %v", err)
 	}
 
-	// Client B (same room) should receive "world"
-	got := readMessage(t, connB, time.Second)
-	if string(got) != "world" {
-		t.Errorf("client B expected 'world', got '%s'", string(got))
+	if receivedOp.Type != InsertOperation {
+		t.Errorf("expected operation type 'insert', got '%v'", receivedOp.Type)
+	}
+	if receivedOp.Position != 0 {
+		t.Errorf("expected position 0, got %d", receivedOp.Position)
+	}
+	if receivedOp.Text != "world" {
+		t.Errorf("expected text 'world', got '%s'", receivedOp.Text)
 	}
 
 	// Client C (different room) must NOT receive "world"
 	expectNoMessage(t, connC, "client C", 200*time.Millisecond)
+}
+
+// ---------------------------------------------------------------------------
+// Validation integration tests — verify the handler rejects invalid operations
+// ---------------------------------------------------------------------------
+
+// TestIntegrationRejectInvalidPosition verifies that the server rejects an
+// INSERT operation with a position out of bounds.
+//
+// Document: "Hello" (length 5)
+// Operation: INSERT at position 100
+// Expected: error response with "position out of bounds", no broadcast
+func TestIntegrationRejectInvalidPosition(t *testing.T) {
+	hub := NewHub()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/ws/documents/", hub.HandleWebSocket)
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	connA := connectClient(t, server.URL, "doc-validation")
+	defer connA.Close()
+
+	connB := connectClient(t, server.URL, "doc-validation")
+	defer connB.Close()
+
+	// Seed the document with "Hello"
+	seedOp := Operation{
+		Type:     InsertOperation,
+		Position: 0,
+		Text:     "Hello",
+	}
+	sendOperation(t, connA, seedOp)
+
+	// A is the sender so it gets no broadcast.
+	// B receives the raw operation broadcast confirming the seed was applied.
+	seedResp := readMessage(t, connB, time.Second)
+	var seedOpReceived Operation
+	if err := json.Unmarshal(seedResp, &seedOpReceived); err != nil {
+		t.Fatalf("failed to parse seed broadcast on B: %v", err)
+	}
+	if seedOpReceived.Type != InsertOperation {
+		t.Fatalf("expected insert operation for seed on B, got '%v'", seedOpReceived.Type)
+	}
+	if seedOpReceived.Position != 0 {
+		t.Fatalf("expected position 0 for seed, got %d", seedOpReceived.Position)
+	}
+	if seedOpReceived.Text != "Hello" {
+		t.Fatalf("expected text 'Hello' for seed, got '%s'", seedOpReceived.Text)
+	}
+
+	// Now send an invalid insert at position 100
+	invalidOp := Operation{
+		Type:     InsertOperation,
+		Position: 100,
+		Text:     "X",
+	}
+	sendOperation(t, connA, invalidOp)
+
+	// Client A should receive an error response (the only message A gets)
+	connA.SetReadDeadline(time.Now().Add(time.Second))
+	_, msgA, err := connA.ReadMessage()
+	if err != nil {
+		t.Fatalf("client A did not receive an error response: %v", err)
+	}
+
+	var errResp map[string]interface{}
+	if err := json.Unmarshal(msgA, &errResp); err != nil {
+		t.Fatalf("failed to parse error response: %v", err)
+	}
+	if errResp["type"] != "error" {
+		t.Errorf("expected error response type, got '%v'", errResp["type"])
+	}
+	errMsg, _ := errResp["error"].(string)
+	if !strings.Contains(errMsg, "position out of bounds") {
+		t.Errorf("expected 'position out of bounds' error, got '%v'", errResp["error"])
+	}
+
+	// Client B should NOT receive any broadcast for the invalid operation
+	expectNoMessage(t, connB, "client B (invalid position)", 200*time.Millisecond)
+}
+
+// TestIntegrationRejectEmptyText verifies that the server rejects an INSERT
+// operation with empty text.
+//
+// Document: "Hello"
+// Operation: INSERT "" at position 2
+// Expected: error response, no broadcast
+func TestIntegrationRejectEmptyText(t *testing.T) {
+	hub := NewHub()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/ws/documents/", hub.HandleWebSocket)
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	connA := connectClient(t, server.URL, "doc-empty-text")
+	defer connA.Close()
+
+	connB := connectClient(t, server.URL, "doc-empty-text")
+	defer connB.Close()
+
+	// Seed the document with "Hello"
+	seedOp := Operation{
+		Type:     InsertOperation,
+		Position: 0,
+		Text:     "Hello",
+	}
+	sendOperation(t, connA, seedOp)
+
+	// B receives the raw operation broadcast confirming the seed was applied.
+	seedResp := readMessage(t, connB, time.Second)
+	var seedOpReceived Operation
+	if err := json.Unmarshal(seedResp, &seedOpReceived); err != nil {
+		t.Fatalf("failed to parse seed broadcast on B: %v", err)
+	}
+
+	// Send an insert with empty text
+	emptyOp := Operation{
+		Type:     InsertOperation,
+		Position: 2,
+		Text:     "",
+	}
+	sendOperation(t, connA, emptyOp)
+
+	// Client A should receive an error response
+	connA.SetReadDeadline(time.Now().Add(time.Second))
+	_, msg, err := connA.ReadMessage()
+	if err != nil {
+		t.Fatalf("client A did not receive an error response: %v", err)
+	}
+
+	var errResp map[string]interface{}
+	if err := json.Unmarshal(msg, &errResp); err != nil {
+		t.Fatalf("failed to parse error response: %v", err)
+	}
+	if errResp["type"] != "error" {
+		t.Errorf("expected error response type, got '%v'", errResp["type"])
+	}
+	errMsg, _ := errResp["error"].(string)
+	if !strings.Contains(errMsg, "empty") {
+		t.Errorf("expected error about empty text, got '%v'", errResp["error"])
+	}
+}
+
+// TestIntegrationRejectInvalidOperationType verifies that the server rejects
+// an operation with an unrecognized type.
+//
+// Operation: {"type": "update"}
+// Expected: error response with "invalid operation type", no broadcast
+func TestIntegrationRejectInvalidOperationType(t *testing.T) {
+	hub := NewHub()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/ws/documents/", hub.HandleWebSocket)
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	connA := connectClient(t, server.URL, "doc-invalid-type")
+	defer connA.Close()
+
+	connB := connectClient(t, server.URL, "doc-invalid-type")
+	defer connB.Close()
+
+	// Send an operation with an invalid type
+	invalidTypeOp := Operation{
+		Type:     OperationType("update"),
+		Position: 0,
+		Text:     "Hello",
+	}
+	sendOperation(t, connA, invalidTypeOp)
+
+	// Client A should receive an error response
+	connA.SetReadDeadline(time.Now().Add(time.Second))
+	_, msgA, err := connA.ReadMessage()
+	if err != nil {
+		t.Fatalf("client A did not receive an error response: %v", err)
+	}
+
+	var errResp map[string]interface{}
+	if err := json.Unmarshal(msgA, &errResp); err != nil {
+		t.Fatalf("failed to parse error response: %v", err)
+	}
+	if errResp["type"] != "error" {
+		t.Errorf("expected error response type, got '%v'", errResp["type"])
+	}
+	if !strings.Contains(errResp["error"].(string), "invalid operation type") {
+		t.Errorf("expected 'invalid operation type' error, got '%v'", errResp["error"])
+	}
+
+	// Client B should NOT receive any broadcast
+	expectNoMessage(t, connB, "client B (invalid type)", 200*time.Millisecond)
+}
+
+// TestIntegrationRejectNegativePosition verifies that the server rejects an
+// INSERT operation with a negative position.
+func TestIntegrationRejectNegativePosition(t *testing.T) {
+	hub := NewHub()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/ws/documents/", hub.HandleWebSocket)
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	connA := connectClient(t, server.URL, "doc-neg-pos")
+	defer connA.Close()
+
+	connB := connectClient(t, server.URL, "doc-neg-pos")
+	defer connB.Close()
+
+	// Seed the document with "Hello"
+	seedOp := Operation{
+		Type:     InsertOperation,
+		Position: 0,
+		Text:     "Hello",
+	}
+	sendOperation(t, connA, seedOp)
+
+	// B receives the raw operation broadcast confirming the seed was applied.
+	seedResp := readMessage(t, connB, time.Second)
+	var seedOpReceived Operation
+	if err := json.Unmarshal(seedResp, &seedOpReceived); err != nil {
+		t.Fatalf("failed to parse seed broadcast on B: %v", err)
+	}
+
+	// Send an insert with negative position
+	negOp := Operation{
+		Type:     InsertOperation,
+		Position: -1,
+		Text:     "X",
+	}
+	sendOperation(t, connA, negOp)
+
+	// Client A should receive an error response
+	connA.SetReadDeadline(time.Now().Add(time.Second))
+	_, msg, err := connA.ReadMessage()
+	if err != nil {
+		t.Fatalf("client A did not receive an error response: %v", err)
+	}
+
+	var errResp map[string]interface{}
+	if err := json.Unmarshal(msg, &errResp); err != nil {
+		t.Fatalf("failed to parse error response: %v", err)
+	}
+	if errResp["type"] != "error" {
+		t.Errorf("expected error response type, got '%v'", errResp["type"])
+	}
+	if !strings.Contains(errResp["error"].(string), "position out of bounds") {
+		t.Errorf("expected 'position out of bounds' error, got '%v'", errResp["error"])
+	}
+}
+
+// TestIntegrationValidInsertNotRejected verifies that a valid insert operation
+// is accepted and not rejected.
+func TestIntegrationValidInsertNotRejected(t *testing.T) {
+	hub := NewHub()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/ws/documents/", hub.HandleWebSocket)
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	connA := connectClient(t, server.URL, "doc-valid")
+	defer connA.Close()
+
+	connB := connectClient(t, server.URL, "doc-valid")
+	defer connB.Close()
+
+	// Send a valid insert
+	op := Operation{
+		Type:     InsertOperation,
+		Position: 0,
+		Text:     "Hello",
+	}
+	sendOperation(t, connA, op)
+
+	// Client B should receive the raw operation broadcast (not an error)
+	got := readMessage(t, connB, time.Second)
+
+	var receivedOp Operation
+	if err := json.Unmarshal(got, &receivedOp); err != nil {
+		t.Fatalf("failed to parse broadcast operation JSON: %v", err)
+	}
+	if receivedOp.Type != InsertOperation {
+		t.Errorf("expected operation type 'insert', got '%v'", receivedOp.Type)
+	}
+	if receivedOp.Position != 0 {
+		t.Errorf("expected position 0, got %d", receivedOp.Position)
+	}
+	if receivedOp.Text != "Hello" {
+		t.Errorf("expected text 'Hello', got '%s'", receivedOp.Text)
+	}
+}
+
+// TestIntegrationRejectDeleteRangeExceedsContent verifies that the server
+// rejects a DELETE operation where position + length exceeds the content
+// length.
+//
+// This is the exact example from the task specification:
+//
+//	Document: "Hello" (length 5)
+//	Delete: position = 3, length = 10
+//	Reject because: 3 + 10 > 5
+//
+// Expected: error response with "exceeds", no broadcast
+func TestIntegrationRejectDeleteRangeExceedsContent(t *testing.T) {
+	hub := NewHub()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/ws/documents/", hub.HandleWebSocket)
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	connA := connectClient(t, server.URL, "doc-delete-exceeds")
+	defer connA.Close()
+
+	connB := connectClient(t, server.URL, "doc-delete-exceeds")
+	defer connB.Close()
+
+	// Seed the document with "Hello"
+	seedOp := Operation{
+		Type:     InsertOperation,
+		Position: 0,
+		Text:     "Hello",
+	}
+	sendOperation(t, connA, seedOp)
+
+	// B receives the raw operation broadcast confirming the seed was applied.
+	seedResp := readMessage(t, connB, time.Second)
+	var seedOpReceived Operation
+	if err := json.Unmarshal(seedResp, &seedOpReceived); err != nil {
+		t.Fatalf("failed to parse seed broadcast on B: %v", err)
+	}
+	if seedOpReceived.Type != InsertOperation {
+		t.Fatalf("expected insert operation for seed on B, got '%v'", seedOpReceived.Type)
+	}
+	if seedOpReceived.Position != 0 {
+		t.Fatalf("expected position 0 for seed, got %d", seedOpReceived.Position)
+	}
+	if seedOpReceived.Text != "Hello" {
+		t.Fatalf("expected text 'Hello' for seed, got '%s'", seedOpReceived.Text)
+	}
+
+	// Send a DELETE with position=3, length=10 (3 + 10 > 5)
+	deleteOp := Operation{
+		Type:     DeleteOperation,
+		Position: 3,
+		Length:   10,
+	}
+	sendOperation(t, connA, deleteOp)
+
+	// Client A should receive an error response (the only message A gets)
+	connA.SetReadDeadline(time.Now().Add(time.Second))
+	_, msgA, err := connA.ReadMessage()
+	if err != nil {
+		t.Fatalf("client A did not receive an error response: %v", err)
+	}
+
+	var errResp map[string]interface{}
+	if err := json.Unmarshal(msgA, &errResp); err != nil {
+		t.Fatalf("failed to parse error response: %v", err)
+	}
+	if errResp["type"] != "error" {
+		t.Errorf("expected error response type, got '%v'", errResp["type"])
+	}
+	errMsg, _ := errResp["error"].(string)
+	if !strings.Contains(errMsg, "exceeds") {
+		t.Errorf("expected error about exceeding content length, got '%v'", errResp["error"])
+	}
+
+	// Client B should NOT receive any broadcast for the rejected operation
+	expectNoMessage(t, connB, "client B (delete range exceeds)", 200*time.Millisecond)
+}
+
+// TestIntegrationValidDeleteNotRejected verifies that a valid DELETE operation
+// is accepted and not rejected.
+//
+// Document: "Hello" (length 5)
+// Delete: position = 0, length = 5
+// Expected: raw delete operation broadcast (entire content deleted)
+func TestIntegrationValidDeleteNotRejected(t *testing.T) {
+	hub := NewHub()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/ws/documents/", hub.HandleWebSocket)
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	connA := connectClient(t, server.URL, "doc-valid-delete")
+	defer connA.Close()
+
+	connB := connectClient(t, server.URL, "doc-valid-delete")
+	defer connB.Close()
+
+	// Seed the document with "Hello"
+	seedOp := Operation{
+		Type:     InsertOperation,
+		Position: 0,
+		Text:     "Hello",
+	}
+	sendOperation(t, connA, seedOp)
+
+	// B receives the seed operation broadcast
+	seedResp := readMessage(t, connB, time.Second)
+	var seedReceived Operation
+	if err := json.Unmarshal(seedResp, &seedReceived); err != nil {
+		t.Fatalf("failed to parse seed broadcast on B: %v", err)
+	}
+
+	// Send a valid DELETE: position=0, length=5 (0 + 5 == 5, not > 5)
+	deleteOp := Operation{
+		Type:     DeleteOperation,
+		Position: 0,
+		Length:   5,
+	}
+	sendOperation(t, connA, deleteOp)
+
+	// Client B should receive the raw delete operation broadcast
+	got := readMessage(t, connB, time.Second)
+
+	var receivedOp Operation
+	if err := json.Unmarshal(got, &receivedOp); err != nil {
+		t.Fatalf("failed to parse broadcast operation JSON: %v", err)
+	}
+	if receivedOp.Type != DeleteOperation {
+		t.Errorf("expected operation type 'delete', got '%v'", receivedOp.Type)
+	}
+	if receivedOp.Position != 0 {
+		t.Errorf("expected position 0, got %d", receivedOp.Position)
+	}
+	if receivedOp.Length != 5 {
+		t.Errorf("expected length 5, got %d", receivedOp.Length)
+	}
 }

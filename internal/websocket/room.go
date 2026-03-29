@@ -60,6 +60,116 @@ func (r *Room) SetContent(content string) {
 	r.Content = content
 }
 
+// ApplyInsert inserts text at the given position in the document content.
+//
+// The insertion is performed mathematically as:
+//
+//	content = content[:position] + text + content[position:]
+//
+// For example, given content "Hello World", inserting "beautiful " at
+// position 6 produces "Hello beautiful World":
+//
+//	content[:6]  = "Hello "
+//	text         = "beautiful "
+//	content[6:]  = "World"
+//	result       = "Hello " + "beautiful " + "World" = "Hello beautiful World"
+//
+// Position must be in the range [0, len(content)]. If position is out of
+// range, the content is returned unchanged.
+//
+// This method acquires the room's write lock, making it safe to call
+// concurrently with other room operations.
+func (r *Room) ApplyInsert(position int, text string) string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.applyInsert(position, text)
+}
+
+// applyInsert is the lock-free core of ApplyInsert.
+// It must only be called while holding the room's write lock.
+func (r *Room) applyInsert(position int, text string) string {
+	if position < 0 || position > len(r.Content) {
+		// Invalid position, return current content unchanged
+		return r.Content
+	}
+	r.Content = r.Content[:position] + text + r.Content[position:]
+	return r.Content
+}
+
+// ApplyDelete deletes length characters starting at the given position in the
+// document content.
+//
+// The deletion is performed mathematically as:
+//
+//	content = content[:position] + content[position+length:]
+//
+// For example, given content "Hello beautiful World", deleting 10 characters
+// at position 6 produces "Hello World":
+//
+//	content[:6]      = "Hello "
+//	content[6+10:]   = content[16:] = "World"
+//	result           = "Hello " + "World" = "Hello World"
+//
+// If position+length extends past the end of the content, only the characters
+// up to the end are deleted.
+//
+// Position must be in the range [0, len(content)-1] and length must be
+// positive. If the position is out of range or length is not positive, the
+// content is returned unchanged.
+//
+// This method acquires the room's write lock, making it safe to call
+// concurrently with other room operations.
+func (r *Room) ApplyDelete(position int, length int) string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.applyDelete(position, length)
+}
+
+// applyDelete is the lock-free core of ApplyDelete.
+// It must only be called while holding the room's write lock.
+func (r *Room) applyDelete(position int, length int) string {
+	if position < 0 || position >= len(r.Content) {
+		// Invalid position, return current content unchanged
+		return r.Content
+	}
+	if length <= 0 {
+		// Non-positive length, return current content unchanged
+		return r.Content
+	}
+	end := position + length
+	if end > len(r.Content) {
+		end = len(r.Content)
+	}
+	r.Content = r.Content[:position] + r.Content[end:]
+	return r.Content
+}
+
+// ApplyOperation applies an operation to the document content under a write lock.
+//
+// The operation is applied atomically:
+//  1. Acquire write lock
+//  2. Read current document content
+//  3. Apply the operation (insert or delete)
+//  4. Update the document content
+//  5. Release the lock
+//  6. Return the updated content
+//
+// The caller is responsible for broadcasting the result after the lock is released,
+// so that slow network writes do not hold up other operations.
+func (r *Room) ApplyOperation(op Operation) string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	switch op.Type {
+	case InsertOperation:
+		return r.applyInsert(op.Position, op.Text)
+	case DeleteOperation:
+		return r.applyDelete(op.Position, op.Length)
+	}
+
+	return r.Content
+}
+
 // ClientCount returns the number of clients in the room.
 func (r *Room) ClientCount() int {
 	r.mu.RLock()
