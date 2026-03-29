@@ -1,23 +1,82 @@
 package websocket
 
-import "sync"
+import (
+	"log"
+	"sync"
+)
 
 // Room represents a collaborative document boundary.
 //
 // Clients within the same Room can communicate with each other.
 // Clients in different Rooms are isolated from one another.
+// The Room holds the shared document Content that all clients collaborate on.
 type Room struct {
+	mu      sync.RWMutex
 	ID      string
+	Content string
 	Clients map[string]*Client
 }
 
-// NewRoom creates and returns a new Room with the given ID
-// and an initialized Clients map.
+// NewRoom creates and returns a new Room with the given ID,
+// an initialized Clients map, and empty Content.
 func NewRoom(id string) *Room {
 	return &Room{
 		ID:      id,
+		Content: "",
 		Clients: make(map[string]*Client),
 	}
+}
+
+// Broadcast sends a message to all clients in the room.
+// If a client's send buffer is full, the message is dropped for that client.
+// The optional senderID parameter can be used to exclude the sender from the broadcast.
+func (r *Room) Broadcast(message []byte, senderID string) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	for id, client := range r.Clients {
+		if id == senderID {
+			continue
+		}
+		select {
+		case client.Send <- message:
+		default:
+			log.Printf("room %s: dropping message for slow client %s", r.ID, client.ID)
+		}
+	}
+}
+
+// GetContent returns the current document content of the room.
+func (r *Room) GetContent() string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.Content
+}
+
+// SetContent sets the document content of the room.
+func (r *Room) SetContent(content string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.Content = content
+}
+
+// ClientCount returns the number of clients in the room.
+func (r *Room) ClientCount() int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return len(r.Clients)
+}
+
+// GetClientsSnapshot returns a copy of the clients slice for safe iteration
+// outside the room's lock.
+func (r *Room) GetClientsSnapshot() []*Client {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	clients := make([]*Client, 0, len(r.Clients))
+	for _, c := range r.Clients {
+		clients = append(clients, c)
+	}
+	return clients
 }
 
 // RoomManager manages all active rooms.
@@ -73,7 +132,10 @@ func (rm *RoomManager) JoinRoom(roomID string, client *Client) *Room {
 		rm.Rooms[roomID] = room
 	}
 
+	room.mu.Lock()
 	room.Clients[client.ID] = client
+	room.mu.Unlock()
+
 	return room
 }
 
@@ -88,10 +150,12 @@ func (rm *RoomManager) LeaveRoom(roomID string, clientID string) {
 		return
 	}
 
+	room.mu.Lock()
 	delete(room.Clients, clientID)
+	isEmpty := len(room.Clients) == 0
+	room.mu.Unlock()
 
-	// Delete the room if it is now empty
-	if len(room.Clients) == 0 {
+	if isEmpty {
 		delete(rm.Rooms, roomID)
 	}
 }
@@ -107,7 +171,11 @@ func (rm *RoomManager) DeleteEmptyRoom(id string) bool {
 		return false
 	}
 
-	if len(room.Clients) > 0 {
+	room.mu.RLock()
+	hasClients := len(room.Clients) > 0
+	room.mu.RUnlock()
+
+	if hasClients {
 		return false
 	}
 

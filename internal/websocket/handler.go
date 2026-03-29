@@ -49,7 +49,7 @@ func (h *Hub) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	room := h.RoomManager.JoinRoom(documentID, client)
 
-	log.Printf("client joined room\nclient_id=%s\nroom=%s\nclients=%d", client.ID, documentID, len(room.Clients))
+	log.Printf("client joined room\nclient_id=%s\nroom=%s\nclients=%d", client.ID, documentID, room.ClientCount())
 
 	// Start the writer goroutine to send messages from the Send channel to the WebSocket
 	go h.writePump(client)
@@ -64,7 +64,7 @@ func (h *Hub) handleClient(client *Client, documentID string) {
 		room, _ := h.RoomManager.GetRoom(documentID)
 		remainingClients := 0
 		if room != nil {
-			remainingClients = len(room.Clients) - 1 // exclude this client (not yet removed)
+			remainingClients = room.ClientCount() - 1 // exclude this client (not yet removed)
 		}
 		h.RoomManager.LeaveRoom(documentID, client.ID)
 		client.Conn.Close()
@@ -94,12 +94,9 @@ func (h *Hub) broadcastToRoom(documentID string, senderID string, messageType in
 		return
 	}
 
-	// Copy the clients map to a slice to avoid concurrent map iteration issues
-	// if a slow client gets disconnected during iteration.
-	var clients []*Client
-	for _, c := range room.Clients {
-		clients = append(clients, c)
-	}
+	// Get a snapshot of clients under the room's read lock to avoid
+	// concurrent map iteration issues.
+	clients := room.GetClientsSnapshot()
 
 	log.Printf("broadcast message\nroom=%s\nclients=%d", documentID, len(clients))
 
