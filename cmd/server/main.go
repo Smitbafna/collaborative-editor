@@ -17,6 +17,9 @@ func main() {
 
 	hub := websocket.NewHub()
 
+	// Serve the frontend
+	mux.Handle("/", http.FileServer(http.Dir("./web")))
+
 	mux.HandleFunc("/health", healthHandler)
 	mux.HandleFunc("/ws/documents/", hub.HandleWebSocket)
 

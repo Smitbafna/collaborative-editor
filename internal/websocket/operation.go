@@ -13,6 +13,8 @@ const (
 	InsertOperation OperationType = "insert"
 	// DeleteOperation represents a delete operation.
 	DeleteOperation OperationType = "delete"
+	// NoOpOperation represents a no-operation (no-op).
+	NoOpOperation OperationType = "noop"
 )
 
 // Operation represents a collaborative document operation.
@@ -20,12 +22,13 @@ const (
 // For INSERT operations, Text contains the text to insert at Position.
 // For DELETE operations, Length specifies the number of characters to delete starting at Position.
 type Operation struct {
-	ID       string        `json:"id"`
-	ClientID string        `json:"client_id"`
-	Type     OperationType `json:"type"`
-	Position int           `json:"position"`
-	Text     string        `json:"text,omitempty"`
-	Length   int           `json:"length,omitempty"`
+	ID          string        `json:"id"`
+	ClientID    string        `json:"client_id"`
+	Type        OperationType `json:"type"`
+	Position    int           `json:"position"`
+	Text        string        `json:"text,omitempty"`
+	Length      int           `json:"length,omitempty"`
+	BaseVersion int64         `json:"base_version"`
 }
 
 // Validate checks whether the operation is valid for a document of the given length.
@@ -33,7 +36,7 @@ type Operation struct {
 // It returns an error describing the first validation failure, or nil if the
 // operation is valid. The following rules are enforced:
 //
-//   - The operation type must be "insert" or "delete".
+//   - The operation type must be "insert", "delete", or "noop".
 //   - For INSERT operations:
 //     - The text must not be empty.
 //     - The position must be in the range [0, contentLength].
@@ -41,6 +44,8 @@ type Operation struct {
 //     - The position must be in the range [0, contentLength-1].
 //     - The length must be positive.
 //     - The position + length must not exceed contentLength.
+//   - For NO-OP operations:
+//     - No validation is required.
 //
 // This method is the server's defence against malformed or malicious client
 // input. It must be called before applying any operation received from a
@@ -64,6 +69,8 @@ func (op Operation) Validate(contentLength int) error {
 		if op.Position+op.Length > contentLength {
 			return errors.New("delete range exceeds content length")
 		}
+	case NoOpOperation:
+		// NO-OP operations require no validation
 	default:
 		return fmt.Errorf("invalid operation type: %q", op.Type)
 	}

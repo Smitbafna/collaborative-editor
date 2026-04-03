@@ -73,6 +73,23 @@ func TestRoomApplyInsertAtEnd(t *testing.T) {
 	}
 }
 
+// TestRoomApplyInsertInMiddle verifies inserting in the middle of the content.
+//
+// Initial content: "Helo"
+// Insert "l" at position 2
+// Expected: "Hello"
+func TestRoomApplyInsertInMiddle(t *testing.T) {
+	room := NewRoom("test-room")
+	room.SetContent("Helo")
+
+	updated := room.ApplyInsert(2, "l")
+
+	expected := "Hello"
+	if updated != expected {
+		t.Errorf("expected '%s', got '%s'", expected, updated)
+	}
+}
+
 // TestRoomApplyInsertOnEmptyContent verifies inserting into empty content.
 //
 // Initial content: ""
@@ -212,7 +229,7 @@ func TestRoomApplyInsertConsistentWithApplyOperation(t *testing.T) {
 		Position: 6,
 		Text:     "beautiful ",
 	}
-	result2 := room2.ApplyOperation(op)
+	result2, _ := room2.ApplyOperation(op)
 
 	if result1 != result2 {
 		t.Errorf("ApplyInsert and ApplyOperation produced different results: '%s' vs '%s'", result1, result2)

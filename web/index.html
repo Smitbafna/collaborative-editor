@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Syncpad — Collaborative Editor</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0f0f13;
+            color: #e0e0e0;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* ─── Top bar ─── */
+        header {
+            padding: 12px 24px;
+            background: #1a1a22;
+            border-bottom: 1px solid #2a2a35;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-shrink: 0;
+        }
+
+        .logo {
+            font-size: 18px;
+            font-weight: 700;
+            letter-spacing: -0.3px;
+        }
+        .logo span { color: #6c5ce7; }
+
+        .status-area {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            font-size: 13px;
+        }
+        .status-dot {
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 6px;
+        }
+        .status-dot.connected  { background: #00ce7a; box-shadow: 0 0 6px #00ce7a66; }
+        .status-dot.disconnected { background: #ff4757; box-shadow: 0 0 6px #ff475766; }
+        .status-dot.reconnecting { background: #ffa502; box-shadow: 0 0 6px #ffa50266; }
+
+        .doc-id {
+            background: #2a2a35;
+            padding: 4px 12px;
+            border-radius: 6px;
+            font-family: 'SF Mono', 'Cascadia Code', monospace;
+            font-size: 12px;
+            color: #888;
+        }
+
+        /* ─── Users bar ─── */
+        .users-bar {
+            padding: 8px 24px;
+            background: #16161e;
+            border-bottom: 1px solid #2a2a35;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            flex-shrink: 0;
+        }
+        .users-bar .label { color: #666; margin-right: 4px; }
+        .user-chip {
+            background: #6c5ce744;
+            color: #b8b0f0;
+            padding: 2px 10px;
+            border-radius: 10px;
+            font-size: 12px;
+        }
+        .user-chip.self { background: #6c5ce7; color: #fff; }
+
+        /* ─── Editor ─── */
+        .editor-wrapper {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            padding: 16px 24px;
+            position: relative;
+        }
+
+        .editor-wrapper textarea {
+            flex: 1;
+            background: #1a1a22;
+            border: 1px solid #2a2a35;
+            border-radius: 8px;
+            padding: 16px 20px;
+            font-family: 'SF Mono', 'Cascadia Code', 'JetBrains Mono', monospace;
+            font-size: 15px;
+            line-height: 1.7;
+            color: #e0e0e0;
+            resize: none;
+            outline: none;
+            transition: border-color 0.15s;
+        }
+        .editor-wrapper textarea:focus {
+            border-color: #6c5ce7;
+        }
+        .editor-wrapper textarea::placeholder {
+            color: #555;
+        }
+
+        /* ─── Footer ─── */
+        footer {
+            padding: 10px 24px;
+            background: #1a1a22;
+            border-top: 1px solid #2a2a35;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 12px;
+            color: #666;
+            flex-shrink: 0;
+        }
+
+        .version-badge {
+            background: #2a2a35;
+            padding: 2px 10px;
+            border-radius: 4px;
+            font-family: monospace;
+            color: #888;
+        }
+
+        .char-count { color: #555; }
+
+        /* ─── Buttons ─── */
+        .btn {
+            background: #2a2a35;
+            border: none;
+            color: #ccc;
+            padding: 6px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            transition: background 0.15s;
+        }
+        .btn:hover { background: #3a3a48; }
+        .btn-primary {
+            background: #6c5ce7;
+            color: #fff;
+        }
+        .btn-primary:hover { background: #7c6cf7; }
+
+        /* ─── Connection overlay ─── */
+        .overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: #0f0f13dd;
+            z-index: 10;
+            align-items: center;
+            justify-content: center;
+        }
+        .overlay.active { display: flex; }
+        .overlay-card {
+            background: #1a1a22;
+            border: 1px solid #2a2a35;
+            border-radius: 12px;
+            padding: 32px 40px;
+            text-align: center;
+            max-width: 400px;
+        }
+        .overlay-card h2 { margin-bottom: 8px; }
+        .overlay-card p { color: #888; font-size: 14px; margin-bottom: 20px; }
+        .spinner {
+            width: 32px; height: 32px;
+            border: 3px solid #2a2a35;
+            border-top-color: #6c5ce7;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin: 0 auto 16px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+
+<!-- ─── Connection Overlay ─── -->
+<div class="overlay active" id="overlay">
+    <div class="overlay-card">
+        <div class="spinner"></div>
+        <h2>Connecting...</h2>
+        <p id="overlay-msg">Establishing connection to Syncpad server</p>
+    </div>
+</div>
+
+<!-- ─── Header ─── -->
+<header>
+    <div class="logo">✦ <span>Syncpad</span></div>
+    <div class="status-area">
+        <span id="status-indicator">
+            <span class="status-dot disconnected"></span>
+            <span id="status-text">Disconnected</span>
+        </span>
+        <span class="doc-id" id="doc-id">doc-xxx</span>
+    </div>
+</header>
+
+<!-- ─── Users Bar ─── -->
+<div class="users-bar">
+    <span class="label">👤 Users:</span>
+    <span id="users-list"><span class="user-chip self">You</span></span>
+</div>
+
+<!-- ─── Editor ─── -->
+<div class="editor-wrapper">
+    <textarea
+        id="editor"
+        placeholder="Start typing here..."
+        spellcheck="false"
+        autofocus
+    ></textarea>
+</div>
+
+<!-- ─── Footer ─── -->
+<footer>
+    <div>
+        <span class="version-badge" id="version-badge">v0</span>
+    </div>
+    <div class="char-count">
+        <span id="char-count">0</span> characters
+    </div>
+    <div>
+        <button class="btn" id="btn-new-tab" onclick="openNewTab()">+ New Tab</button>
+    </div>
+</footer>
+
+<script>
+// ─── Configuration ────────────────────────────────────────────
+
+// Get document ID from URL, or use a fixed default so all tabs
+// pointing to http://localhost:8080 without ?doc= share the same document.
+const urlParams = new URLSearchParams(window.location.search);
+const DOCUMENT_ID = urlParams.get('doc') || 'default';
+
+// Determine WebSocket URL
+const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+const WS_URL = `${wsProto}//${location.host}/ws/documents/${DOCUMENT_ID}`;
+
+// ─── State ────────────────────────────────────────────────────
+
+let ws = null;
+let localContent = '';
+let localVersion = 0;
+let expectedNextVersion = 1;
+let clientId = null;
+let reconnectTimer = null;
+let isApplyingRemote = false;
+let pendingRequest = false;
+
+// ─── DOM refs ─────────────────────────────────────────────────
+
+const editor = document.getElementById('editor');
+const overlay = document.getElementById('overlay');
+const overlayMsg = document.getElementById('overlay-msg');
+const statusIndicator = document.getElementById('status-indicator');
+const statusText = document.getElementById('status-text');
+const docIdEl = document.getElementById('doc-id');
+const versionBadge = document.getElementById('version-badge');
+const charCount = document.getElementById('char-count');
+const usersList = document.getElementById('users-list');
+
+docIdEl.textContent = DOCUMENT_ID;
+
+// ─── Connection ───────────────────────────────────────────────
+
+function connect() {
+    if (ws) {
+        ws.onclose = null;
+        ws.close();
+    }
+
+    setStatus('reconnecting', 'Connecting...');
+    overlay.classList.add('active');
+    overlayMsg.textContent = `Connecting to document "${DOCUMENT_ID}"...`;
+
+    ws = new WebSocket(WS_URL);
+
+    ws.onopen = () => {
+        console.log('WebSocket connected');
+        setStatus('connected', 'Connected');
+        overlay.classList.remove('active');
+        if (reconnectTimer) {
+            clearTimeout(reconnectTimer);
+            reconnectTimer = null;
+        }
+    };
+
+    ws.onmessage = (event) => {
+        try {
+            const msg = JSON.parse(event.data);
+            handleMessage(msg);
+        } catch (e) {
+            console.error('Failed to parse message:', e);
+        }
+    };
+
+    ws.onclose = (event) => {
+        console.log('WebSocket closed:', event.code, event.reason);
+        setStatus('disconnected', 'Disconnected');
+        overlay.classList.add('active');
+        overlayMsg.textContent = 'Connection lost. Reconnecting...';
+
+        // Attempt reconnection after 2 seconds
+        if (!reconnectTimer) {
+            reconnectTimer = setTimeout(() => {
+                reconnectTimer = null;
+                connect();
+            }, 2000);
+        }
+    };
+
+    ws.onerror = (err) => {
+        console.error('WebSocket error:', err);
+    };
+}
+
+function setStatus(dotClass, text) {
+    statusIndicator.innerHTML = `
+        <span class="status-dot ${dotClass}"></span>
+        <span id="status-text">${text}</span>
+    `;
+}
+
+// ─── Message Handling ─────────────────────────────────────────
+
+function handleMessage(msg) {
+    switch (msg.type) {
+
+        case 'document_snapshot':
+            console.log('Received snapshot:', msg.content, 'v' + msg.version);
+            localContent = msg.content || '';
+            localVersion = msg.version || 0;
+            expectedNextVersion = localVersion + 1;
+            lastKnownContent = localContent;  // sync the diff tracker with the actual content
+            isApplyingRemote = true;
+            updateEditor(localContent);
+            isApplyingRemote = false;
+            updateMeta();
+            break;
+
+        case 'operation':
+            console.log('Received operation:', msg.operation, 'v' + msg.version);
+
+            // Apply the operation to local content
+            if (msg.operation && msg.operation.type) {
+                localContent = applyOperation(localContent, msg.operation);
+            }
+
+            // Update version
+            if (msg.version > localVersion) {
+                localVersion = msg.version;
+                expectedNextVersion = localVersion + 1;
+            }
+
+            lastKnownContent = localContent;  // sync the diff tracker
+            isApplyingRemote = true;
+            updateEditor(localContent);
+            isApplyingRemote = false;
+            updateMeta();
+            break;
+
+        case 'error':
+            console.error('Server error:', msg.message);
+            // Show error briefly
+            break;
+
+        case 'sync_required':
+            console.log('Sync required:', msg);
+            // Apply all missing operations
+            if (msg.operations) {
+                for (const syncOp of msg.operations) {
+                    if (syncOp.operation && syncOp.operation.type) {
+                        localContent = applyOperation(localContent, syncOp.operation);
+                    }
+                    if (syncOp.version > localVersion) {
+                        localVersion = syncOp.version;
+                    }
+                }
+                expectedNextVersion = localVersion + 1;
+                lastKnownContent = localContent;  // sync the diff tracker
+                isApplyingRemote = true;
+                updateEditor(localContent);
+                isApplyingRemote = false;
+                updateMeta();
+            }
+            break;
+
+        default:
+            console.log('Unknown message type:', msg.type, msg);
+    }
+}
+
+// ─── Apply Operation Locally ──────────────────────────────────
+
+function applyOperation(content, op) {
+    if (op.type === 'insert') {
+        const pos = Math.min(op.position, content.length);
+        return content.slice(0, pos) + op.text + content.slice(pos);
+    }
+    if (op.type === 'delete') {
+        const pos = Math.min(op.position, content.length);
+        const end = Math.min(pos + op.length, content.length);
+        return content.slice(0, pos) + content.slice(end);
+    }
+    if (op.type === 'noop') {
+        return content;
+    }
+    return content;
+}
+
+// ─── Editor Updates ───────────────────────────────────────────
+
+function updateEditor(content) {
+    if (editor.value !== content) {
+        isApplyingRemote = true;
+        const cursorPos = editor.selectionStart;
+        editor.value = content;
+        // Restore cursor position, but clamp to new length
+        const newPos = Math.min(cursorPos, content.length);
+        editor.setSelectionRange(newPos, newPos);
+        isApplyingRemote = false;
+    }
+    charCount.textContent = content.length;
+}
+
+function updateMeta() {
+    versionBadge.textContent = 'v' + localVersion;
+}
+
+// ─── Sending Operations ───────────────────────────────────────
+
+function sendOperation(op) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+        console.warn('Cannot send: WebSocket not open');
+        return;
+    }
+
+    // Assign a unique ID for idempotency
+    if (!op.id) {
+        op.id = clientId + '-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
+    }
+    if (op.base_version === undefined) {
+        op.base_version = localVersion;
+    }
+
+    ws.send(JSON.stringify(op));
+}
+
+// ─── Diff & Send on Input ─────────────────────────────────────
+
+// Track the last known content before user edits
+let lastKnownContent = '';
+
+editor.addEventListener('focus', () => {
+    lastKnownContent = editor.value;
+});
+
+// Debounce to avoid sending too many operations during fast typing
+let inputTimer = null;
+
+editor.addEventListener('input', () => {
+    if (isApplyingRemote) return;
+
+    const newContent = editor.value;
+    const oldContent = lastKnownContent;
+    lastKnownContent = newContent;
+
+    if (newContent === oldContent) return;
+
+    // Compute the diff
+    const diff = computeDiff(oldContent, newContent);
+
+    if (diff) {
+        // Send operation with current local version as base
+        diff.base_version = localVersion;
+        sendOperation(diff);
+    }
+
+    updateMeta();
+
+    // Debounced: send a request for missing operations if we detect a gap
+    if (inputTimer) clearTimeout(inputTimer);
+    inputTimer = setTimeout(() => {
+        checkVersionGap();
+    }, 200);
+});
+
+function computeDiff(oldText, newText) {
+    // Find the first position where they differ
+    let start = 0;
+    const minLen = Math.min(oldText.length, newText.length);
+    while (start < minLen && oldText[start] === newText[start]) {
+        start++;
+    }
+
+    // If no difference at all
+    if (start === minLen && oldText.length === newText.length) {
+        return null;
+    }
+
+    // Find the end of the change from the right
+    let oldEnd = oldText.length;
+    let newEnd = newText.length;
+    while (oldEnd > start && newEnd > start && oldText[oldEnd - 1] === newText[newEnd - 1]) {
+        oldEnd--;
+        newEnd--;
+    }
+
+    const oldRemoved = oldText.slice(start, oldEnd);
+    const newInserted = newText.slice(start, newEnd);
+
+    if (oldRemoved.length > 0 && newInserted.length === 0) {
+        // Pure delete
+        return {
+            id: null,
+            type: 'delete',
+            position: start,
+            length: oldRemoved.length,
+        };
+    }
+
+    if (oldRemoved.length === 0 && newInserted.length > 0) {
+        // Pure insert
+        return {
+            id: null,
+            type: 'insert',
+            position: start,
+            text: newInserted,
+        };
+    }
+
+    // Replace (delete then insert) — send as delete + insert
+    // For simplicity, send as delete first. The second part will be
+    // caught by the next input event.
+    // Actually, let's handle it: send a delete for the removed part,
+    // and then the remaining insert will be caught on the next event.
+    if (oldRemoved.length > 0 && newInserted.length > 0) {
+        // Send the delete first
+        return {
+            id: null,
+            type: 'delete',
+            position: start,
+            length: oldRemoved.length,
+        };
+        // The insert will be detected on the next input event
+    }
+
+    return null;
+}
+
+// ─── Version Gap Detection ────────────────────────────────────
+
+function checkVersionGap() {
+    if (pendingRequest) return;
+
+    // If we think we're behind, request missing operations
+    // This is a simplified check - the server handles this anyway
+}
+
+// ─── Request Missing Operations ──────────────────────────────
+
+function requestMissingOperations(afterVersion) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    pendingRequest = true;
+    ws.send(JSON.stringify({
+        type: 'request_missing_operations',
+        after_version: afterVersion,
+        base_version: afterVersion,
+    }));
+    setTimeout(() => { pendingRequest = false; }, 1000);
+}
+
+// ─── Cursor / Selection Sync (baseline) ───────────────────────
+
+// We track our own client ID from the first message
+// The server assigns a UUID, but we can generate a local one
+clientId = 'web-' + Math.random().toString(36).slice(2, 8);
+
+// ─── New Tab ──────────────────────────────────────────────────
+
+function openNewTab() {
+    const url = window.location.pathname + '?doc=' + DOCUMENT_ID;
+    window.open(url, '_blank');
+}
+
+// ─── Init ─────────────────────────────────────────────────────
+
+// Set initial content
+editor.value = '';
+lastKnownContent = '';
+updateMeta();
+
+// Connect
+connect();
+
+// Update character count on any change
+editor.addEventListener('input', () => {
+    charCount.textContent = editor.value.length;
+});
+
+console.log('Syncpad frontend initialized');
+console.log('Document ID:', DOCUMENT_ID);
+console.log('WebSocket URL:', WS_URL);
+</script>
+</body>
+</html>

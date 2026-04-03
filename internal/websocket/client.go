@@ -16,6 +16,10 @@ type Client struct {
 	ID   string
 	Conn *websocket.Conn
 	Send chan []byte
+
+	// BaseVersion tracks the document version this client has.
+	// It is updated when the client receives operations or snapshots.
+	BaseVersion int64
 }
 
 // NewClient creates and returns a new Client with a unique ID

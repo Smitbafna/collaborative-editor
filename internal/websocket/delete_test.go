@@ -290,7 +290,7 @@ func TestRoomApplyDeleteConsistentWithApplyOperation(t *testing.T) {
 		Position: 6,
 		Length:   10,
 	}
-	result2 := room2.ApplyOperation(op)
+	result2, _ := room2.ApplyOperation(op)
 
 	if result1 != result2 {
 		t.Errorf("ApplyDelete and ApplyOperation produced different results: '%s' vs '%s'", result1, result2)

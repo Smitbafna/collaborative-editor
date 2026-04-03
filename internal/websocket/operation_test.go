@@ -113,6 +113,26 @@ func TestValidateInsertPositionOnePastEnd(t *testing.T) {
 	}
 }
 
+// TestValidateInsertPosition999 verifies that an insert with position = 999
+// is rejected.
+//
+// Content: "Hello" (length 5)
+// Insert "X" at position 999 → rejected: "position out of bounds"
+func TestValidateInsertPosition999(t *testing.T) {
+	op := Operation{
+		Type:     InsertOperation,
+		Position: 999,
+		Text:     "X",
+	}
+	err := op.Validate(5)
+	if err == nil {
+		t.Fatal("expected error for position 999, got nil")
+	}
+	if !strings.Contains(err.Error(), "position out of bounds") {
+		t.Errorf("expected 'position out of bounds' error, got: %v", err)
+	}
+}
+
 // TestValidateInsertOnEmptyContent verifies that inserting into empty content
 // at position 0 is valid.
 func TestValidateInsertOnEmptyContent(t *testing.T) {
